@@ -18,11 +18,12 @@ from bs4 import BeautifulSoup
 
 import urllib2
 import time
+import os
 
 pirate = TPB('https://thepiratebay.org')
 IMDB_search = 'http://akas.imdb.com/search'
 MIN_SEEDERS = 20
-
+SAVE_PATH = "./torrents/"
 
 '''
 A function to search imdb. 
@@ -99,7 +100,7 @@ def download_torrent(torrent):
     e = lt.bdecode(open(torrent, 'rb').read())
     info = lt.torrent_info(e)
 
-    params = { 'save_path': './', \
+    params = { 'save_path': SAVE_PATH, \
         'storage_mode': lt.storage_mode_t.storage_mode_sparse, \
         'ti': info }
 
@@ -113,7 +114,7 @@ def download_torrent(torrent):
                 (s.progress * 100, s.download_rate / 1000, s.upload_rate / 1000, \
                 s.num_peers, s.state))
 
-        time.sleep(10)
+        time.sleep(1)
 
 '''
 Get a torrent file from ThePirateBay.
@@ -147,41 +148,41 @@ def download_torrent_file(torrent_url):
     return file_name
 
 '''
-Convert a magnet file to a torrent and download it.
+Convert a magnet file to a torrent and download the torrent associated with it.
 Parameter: magnet
     The magnet link to use.
-Parameter: filename
-    The filename to save the torrent as.
 Return:
-    The filename with .torrent added to the end.
+    None.
 '''
-def magnet_to_torrent(magnet, filename):
+def download_magnet(magnet):
     ses = lt.session()
 
 
-    params = { 'save_path': './', \
+    params = { 'save_path': SAVE_PATH, \
         'duplicate_is_error' : True }
+    #add the magnet
     h = lt.add_magnet_uri(ses, magnet, params)
 
+    #get the metadata from the magnet
     while (not h.has_metadata()):
+        print "Receiving metadata..."
+        time.sleep(1)
+    
+    #download the torrent
+    while (not h.is_seed()):
+        s = h.status()
+        print('%.2f%% complete (down: %.1f kb/s up: %.1f kB/s peers: %d) %s' % \
+                (s.progress * 100, s.download_rate / 1000, s.upload_rate / 1000, \
+                s.num_peers, s.state))
         time.sleep(1)
 
-    info = h.get_torrent_info()
-    fs = lt.file_storage()
-    for f in info.files():
-        fs.add_file(f)
-    torfile = lt.create_torrent(fs)
-    torfile.set_comment(info.comment()) 
-    torfile.set_creator(info.creator())
-    
-    f = open("{0}.torrent".format(filename), "wb")
-    f.write(lt.bencode(torfile.generate())) 
-    f.close() 
-    print 'saved and closing...'
-    return "{0}.torrent".format(filename)
-
+def configure():
+   if not os.path.exists(SAVE_PATH):
+       os.makedirs(SAVE_PATH)
+       print "Torrents directory not found, creating..."
 
 if __name__ == "__main__":
+    configure()
     imdb_results = search(['2011-02-14', '2013-04-12'], 'desc')
     movie_titles = get_titles(imdb_results)
     i = 0
@@ -191,5 +192,4 @@ if __name__ == "__main__":
         torrent = get_torrent(movie_titles[i])
         i += 1
     print torrent.seeders
-    download_torrent(magnet_to_torrent(torrent.magnet_link, torrent.title))
-
+    download_magnet(torrent.magnet_link)

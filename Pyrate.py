@@ -10,25 +10,24 @@
 #         LibTorrent
 ################################################
 
+import urllib2
+import time
+import datetime
+
 import libtorrent as lt
 from tpb import TPB
 from tpb import CATEGORIES, ORDERS
-
 from bs4 import BeautifulSoup
 
-import urllib2
-import time
+import configparser
 import os
 
-pirate = TPB('https://thepiratebay.org')
-IMDB_search = 'http://akas.imdb.com/search'
-MIN_SEEDERS = 20
-SAVE_PATH = "./torrents/"
+SETTINGS_PATH = "settings.ini"
 
 '''
 A function to search imdb. 
 Parameter: date_range
-    A list of two strings in the format YYYY-MM-DD
+    A string in the format of 'YYYY-MM-DD YYYY-MM-DD'
 Parameter: rating
     Either asc or desc as a string.  Other values will
     return an error
@@ -36,17 +35,17 @@ Return: Raw HTML returned by searching IMDB.
 '''
 def search(date_range, rating):
     #various arguments in the advanced search
-    release = 'release_date={0},{1}'.format(date_range[0], date_range[1])
+    url = get_setting("url")
+    release = 'release_date={0}'.format(date_range)
     title = 'title?at=0'
     language = 'languages=en'
     title_type = 'title_type=feature'
     sort = 'sort=user_rating,{0}'.format(rating)
     votes = 'num_votes=100,'
-
     #the url to query imdb
-    search_url = '{0}/{1}&{2}&{3}&{4}&{5}&{6}'.format(IMDB_search, title, language, votes, release, sort, title_type)
+    search_url = '{0}/{1}&{2}&{3}&{4}&{5}&{6}'.format(url, title, language, votes, release, sort, title_type)
     results = urllib2.urlopen(search_url)
-    print search_url
+    print "Searching using url : {0}".format(search_url)
     return results.read()
 
 
@@ -57,11 +56,12 @@ Parameter: imdb_html
 Return:
     A list of movie titles
 '''
-def get_titles(imdb_html):
+def get_titles_and_ratings(imdb_html):
     bs = BeautifulSoup(imdb_html)
-    links = []
+    links = {}
     for title in bs.find_all('td', {'class' : 'title'}):
-         links.append(title.find('a').text)
+         links[title.find('a').text] = float(title.find('span', {'class' : 'value'}).text)
+    print links
     return links
 
 '''
@@ -74,11 +74,12 @@ Return:
 '''
 def get_torrent(title):
     result = None
+    pirate = TPB('https://thepiratebay.org')
     search = pirate.search(title, category=CATEGORIES.VIDEO.MOVIES).order(ORDERS.SEEDERS.DES)
     for torrent in search:
         result = torrent
         break; 
-    if(result == None or result.seeders < MIN_SEEDERS):
+    if(result == None or result.seeders < int(get_setting("seeders"))):
         return None
     else:
         return result
@@ -176,20 +177,103 @@ def download_magnet(magnet):
                 s.num_peers, s.state))
         time.sleep(1)
 
+'''
+If settings.conf doesn't exist, create it and fill it with user input.
+If it does exist, iterate through it and fill the settings.  If there are
+extraneous settings, remove them.  If settings are missing, prompt the user
+for them.
+'''
 def configure():
-   if not os.path.exists(SAVE_PATH):
-       os.makedirs(SAVE_PATH)
-       print "Torrents directory not found, creating..."
+    if not os.path.exists(get_setting("save")):
+        os.makedirs(get_setting("save"))
+        print "Torrents directory not found, creating..."
+
+'''
+Load in the settings.ini file.
+Return:
+    A configparser object containing settings.ini.
+'''
+def load_settings():
+    settings = configparser.ConfigParser()
+    settings.read(SETTINGS_PATH)
+    settings = settings["Search"]
+    return settings
+
+def get_setting(setting):
+    return load_settings()[setting]
+
+def subtract_years(date, years):
+    dates = date.split(" ")
+    new_dates = []
+    for d in dates:
+        new_dates.append(str(int(d[0:4]) - years) + d[4:])
+    return " ".join(new_dates)
+
+def keys_from_dict(_dict, number, order):
+    keys = []
+    for i in range(number):
+        if(order == 'asc'):
+            _key = max(_dict.iterkeys(), key=(lambda key: _dict[key]))
+        elif(order  == 'desc'):
+            _key = min(_dict.iterkeys(), key=(lambda key: _dict[key]))
+
+        else:
+            return []
+        _dict.pop(_key)
+        keys.append(_key)
+    return keys
+
+def get_movies():
+    date = get_setting("dates")
+    if(date == 'None'):
+        #if no date is selected, then the date used should be today
+        date = str(datetime.date.today())
+        date = "{0} {1}".format(date, date)
+
+    years = int(get_setting("years"))
+    good_html = []
+    bad_html = []
+    
+    good_results = {}
+    bad_results = {}
+    
+    for i in range(years): 
+        print date, i
+        search_date = subtract_years(date, i+1)
+        good_html = search(search_date, 'asc')
+        bad_html = search(search_date, 'desc')
+
+        
+        good_results.update(get_titles_and_ratings(good_html))
+        bad_results.update(get_titles_and_ratings(bad_html))
+    to_download = keys_from_dict(good_results, int(get_setting("good")), 'asc')
+    to_download += keys_from_dict(bad_results, int(get_setting("bad")), 'desc')
+    return to_download 
+    
 
 if __name__ == "__main__":
     configure()
-    imdb_results = search(['2011-02-14', '2013-04-12'], 'desc')
-    movie_titles = get_titles(imdb_results)
-    i = 0
-    torrent = None
-    while(torrent == None):
-        print "Attempting to get torrent {0}".format(movie_titles[i])
-        torrent = get_torrent(movie_titles[i])
-        i += 1
-    print torrent.seeders
-    download_magnet(torrent.magnet_link)
+    if(get_setting("time") == "None"):
+        #get a list of movies we want
+        movie_list = get_movies()
+        torrents = []
+
+        #Try to find torrents for those movies
+        for movie in movie_list:
+            print "Attempting to get torrent for {0}".format(movie)
+            torrent = get_torrent(movie)
+            if(torrent):
+                print("Success!")
+                torrents.append(torrent)
+            else:
+                print("Sorry, no torrent found.")
+        
+        #if no torrents were found, stop
+        if(len(torrents) == 0):
+            print("Sorry, none of the movies were found on the piratebay...exiting quietly.")
+        
+        #otherwise, download the torrents
+        else:
+            for torrent in torrents:
+                download_magnet(torrent.magnet_link)
+

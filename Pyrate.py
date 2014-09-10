@@ -111,13 +111,13 @@ def download_magnet(magnet):
 
     #get the metadata from the magnet
     while (not h.has_metadata()):
-        print "Receiving metadata..."
+        quiet_print("Receiving metadata...")
         time.sleep(1)
     
     #download the torrent
     while (not h.is_seed()):
         s = h.status()
-        print('%.2f%% complete (down: %.1f kb/s up: %.1f kB/s peers: %d) %s' % \
+        quiet_print('%.2f%% complete (down: %.1f kb/s up: %.1f kB/s peers: %d) %s' % \
                 (s.progress * 100, s.download_rate / 1000, s.upload_rate / 1000, \
                 s.num_peers, s.state))
         time.sleep(1)
@@ -137,13 +137,13 @@ def get_torrents(movies, number):
     torrents = []
     i = 0
     while i<len(movies) and len(torrents) < number:
-        print("Attempting to get torrent for {0}".format(movies[i]))
+        quiet_print("Attempting to get torrent for {0}".format(movies[i]))
         torrent = search_torrent(movies[i])
         if(torrent):
-            print("Found a torrent!")
+            quiet_print("Found a torrent!")
             torrents.append(torrent)
         else:
-            print("No torrent found...")
+            quiet_print("No torrent found...")
         i += 1
     return torrents
 
@@ -159,7 +159,14 @@ for them.
 def configure():
     if not os.path.exists(get_setting("save")):
         os.makedirs(get_setting("save"))
-        print "Torrents directory not found, creating..."
+        quiet_print("Torrents directory not found, creating...")
+
+'''
+Doesn't print if it's going to be run in the background.
+'''
+def quiet_print(string):
+    if(get_setting(time) == "None"):
+        print string
 
 '''
 Load in the settings.ini file.
@@ -280,9 +287,9 @@ def run():
     torrents = []
 
     #Try to find torrents for those movies
-    print("Getting good movies...")
+    quiet_print("Getting good movies...")
     to_download = get_torrents(good_movies, int(get_setting("good")))
-    print("Getting bad movies...")
+    quiet_print("Getting bad movies...")
     to_download += get_torrents(bad_movies, int(get_setting("bad")))
     
     #remove duplicates
@@ -290,7 +297,7 @@ def run():
     
     #if no torrents were found, stop
     if(len(to_download) == 0):
-        print("Sorry, none of the movies were found on the piratebay...exiting quietly.")
+        quiet_print("Sorry, none of the movies were found on the piratebay...exiting quietly.")
 
     #otherwise, download the torrents (ensuring that we don't download duplicates)
     else:
